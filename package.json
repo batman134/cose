@@ -1,0 +1,9 @@
+{
+  "name": "ecommerce-microservices",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test:resilience": "node scripts/test_circuit_breaker.js",
+    "test:resilience:assert": "node scripts/assert_circuit_breaker.js"
+  }
+}

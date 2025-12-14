@@ -1,0 +1,25 @@
+{
+  "name": "order-service",
+  "version": "1.0.0",
+  "description": "Order microservice for Phase 2 (publishes order_created, optional order_cancelled)",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.3",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "mongoose": "^7.6.0",
+    "morgan": "^1.10.0",
+    "uuid": "^9.0.1",
+    "axios": "^1.4.0",
+    "pino": "^8.13.0",
+    "express-pino-logger": "^6.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
