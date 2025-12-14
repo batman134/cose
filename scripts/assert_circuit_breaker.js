@@ -9,6 +9,8 @@ const GATEWAY = process.env.GATEWAY || 'http://localhost:8080';
 const USER = process.env.TEST_USER || 'admin';
 const PASS = process.env.TEST_PASS || 'password';
 const PAYMENT_KEY = process.env.PAYMENT_KEY || 'http://payment-service:3004';
+const TEST_CUSTOMER_ID = process.env.TEST_CUSTOMER_ID;
+let effectiveCustomerId = TEST_CUSTOMER_ID;
 const ATTEMPTS = parseInt(process.env.TEST_ATTEMPTS || '20', 10);
 const MIN_REQUESTS = parseInt(process.env.MIN_REQUESTS || '10', 10);
 const RECOVERY_WAIT_MS = parseInt(process.env.RECOVERY_WAIT_MS || '35000', 10); // default > 30s
@@ -30,7 +32,7 @@ async function login(){
 }
 
 async function createOrder(token){
-  const payload = { customerId: 'u1', items: [{ productId: 'p1', quantity: 1 }], total: 9.99 };
+  const payload = { customerId: effectiveCustomerId || 'u1', items: [{ productId: 'p1', quantity: 1 }], total: 9.99 };
   try{
     const r = await axios.post(`${GATEWAY}/api/orders`, payload, { headers: { Authorization: `Bearer ${token}`}, timeout: 10000 });
     return { status: r.status, data: r.data };
@@ -55,9 +57,25 @@ function startPayment(){
   const token = await login();
   console.log('access token retrieved');
 
-  // Stop payment-service to simulate failure
-  console.log('2) Stopping payment-service to simulate failure');
-  stopPayment();
+  // Ensure a valid test customer exists (optional)
+  if (!TEST_CUSTOMER_ID) {
+    try {
+      const r = await axios.post(`${GATEWAY}/api/customers`, { name: 'test-user', email: `test-${Date.now()}@example.com`, password: 'testpass' }, { headers: { Authorization: `Bearer ${token}`}, timeout: 5000 });
+      const created = r.data.id || r.data._id;
+      console.log('Created test customer id', created);
+      effectiveCustomerId = created;
+    } catch (e) {
+      console.warn('Could not create test customer:', e.message);
+    }
+  }
+
+  // Enable payment debug mode to force 500 responses (safer than stopping container)
+  console.log('2) Enabling payment debug fail mode to simulate failures');
+  try {
+    await axios.post(`${GATEWAY}/api/payments/debug/fail`, { forceFail: true, delayMs: 0 }, { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 });
+  } catch (e) {
+    console.warn('Failed to enable payment debug fail mode via gateway:', e.message);
+  }
 
   // Send requests to trigger failures
   console.log('3) Issuing order requests to trigger failures');
@@ -89,9 +107,13 @@ function startPayment(){
   }
   console.log('Circuit is OPEN');
 
-  // Start payment service again to allow recovery
-  console.log(`5) Starting payment-service and waiting ${RECOVERY_WAIT_MS}ms for recovery window`);
-  startPayment();
+  // Disable payment debug fail mode to allow recovery
+  console.log(`5) Disabling payment debug fail mode and waiting ${RECOVERY_WAIT_MS}ms for recovery window`);
+  try {
+    await axios.post(`${GATEWAY}/api/payments/debug/fail`, { forceFail: false, delayMs: 0 }, { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 });
+  } catch (e) {
+    console.warn('Failed to disable payment debug fail mode via gateway:', e.message);
+  }
   await sleep(RECOVERY_WAIT_MS);
 
   // Check that the breaker transitions to HALF_OPEN or CLOSED on a test request
@@ -102,6 +124,16 @@ function startPayment(){
     const circuits = await getCircuits(token);
     const br = circuits?.circuits?.[PAYMENT_KEY];
     if (br && (br.state === 'HALF_OPEN' || br.state === 'CLOSED')) { recovered = true; break; }
+
+    // Trigger a probe order to cause the breaker to transition from OPEN -> HALF_OPEN
+    // (allowRequest flips to HALF_OPEN on the first call after recovery window)
+    try {
+      const probe = await createOrder(token);
+      console.log('probe order:', probe.err ? JSON.stringify(probe.err) : probe.status);
+    } catch (e) {
+      console.warn('probe order error', e.message);
+    }
+
     await sleep(POLL_INTERVAL_MS);
   }
 
