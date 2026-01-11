@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import morgan from 'morgan';
 import ordersRouter from './routes/orders.js';
 import debugRouter from './routes/debug.js';
+import metrics from './utils/metrics.js';
 import { connectDB } from './db.js';
 import { connectRabbitMQ } from './events/publisher.js';
 import expressPino from 'express-pino-logger';
@@ -16,12 +17,17 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(express.json());
+// Prometheus metrics middleware
+app.use(metrics.metricsMiddleware);
 app.use(morgan('dev'));
 app.use(expressPino({ logger }));
 
 // Routes
 app.use('/api/orders', ordersRouter);
 app.use('/debug', debugRouter);
+
+// Expose Prometheus metrics
+app.get('/metrics', metrics.metricsHandler);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
